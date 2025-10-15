@@ -37,6 +37,16 @@ const settingsClose = document.getElementById('settings-close');
 const languageSelect = document.getElementById('language-select');
 const userLabel = document.querySelector('.app-user-label');
 const docEl = document.documentElement;
+const cursorTooltip = wrapper ? (() => {
+    const el = document.createElement('div');
+    el.className = 'cursor-tooltip';
+    wrapper.appendChild(el);
+    return el;
+})() : null;
+
+const CURSOR_TOOLTIP_MARGIN_X = 10;
+const CURSOR_TOOLTIP_MARGIN_Y = 14;
+const CURSOR_THROTTLE_MS = 40;
 
 let myCol = '#3b82f6';
 let myId = null;
@@ -50,6 +60,10 @@ let workspaceLabel = 'Main Workspace';
 let workspaceList = [];
 let workspaceNoteTimer = null;
 let workspaceBusy = false;
+let cursorEmitTimer = null;
+let lastCursorEmit = 0;
+let lastSentCursorPos = null;
+let activeTooltipPeer = null;
 
 const WEATHER_STORAGE_KEY = 'collab_weather_locations';
 let weatherLocations = [];
@@ -579,6 +593,11 @@ document.addEventListener('click', event => {
     closeSettings();
 });
 
+if (wrapper) {
+    wrapper.addEventListener('pointermove', handleCursorHover);
+    wrapper.addEventListener('pointerleave', () => hideCursorTooltip());
+}
+
 function caretClientXY(pos) {
     const before = esc(ed.value.substring(0, pos)).replace(/\n/g, '<br>');
     meas.innerHTML = before + '<span id="caret-marker">\u200b</span>';
@@ -654,6 +673,7 @@ socket.on('init', data => {
     renderSegments();
     drawCurs();
     updateStatusBar();
+    scheduleCursorBroadcast(true);
 });
 
 socket.on('sync', data => {
@@ -764,6 +784,7 @@ socket.on('workspace_switched', data => {
     renderSegments();
     drawCurs();
     updateStatusBar();
+    scheduleCursorBroadcast(true);
     setWorkspaceBusy(false);
     showWorkspaceNote(t('workspaceReady'), 'success');
 });
@@ -788,22 +809,60 @@ ed.addEventListener('input', () => {
     renderSegments();
     drawCurs();
     updateStatusBar();
+    scheduleCursorBroadcast();
 });
 
-let curT;
-function sendCur() {
-    clearTimeout(curT);
-    curT = setTimeout(() => socket.emit('cur', { pos: ed.selectionStart }), 50);
+const CURSOR_NAV_KEYS = new Set([
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'ArrowDown',
+    'Home',
+    'End',
+    'PageUp',
+    'PageDown'
+]);
+
+if (ed) {
+    ed.addEventListener('focus', () => scheduleCursorBroadcast(true));
+    ed.addEventListener('blur', () => {
+        lastSentCursorPos = null;
+        hideCursorTooltip();
+        if (cursorEmitTimer) {
+            clearTimeout(cursorEmitTimer);
+            cursorEmitTimer = null;
+        }
+    });
+    ed.addEventListener('mouseup', () => {
+        setTimeout(() => scheduleCursorBroadcast(true), 0);
+    });
+    ed.addEventListener('touchend', () => {
+        setTimeout(() => scheduleCursorBroadcast(true), 0);
+    });
+    ed.addEventListener('keyup', event => {
+        if (event.key === 'Backspace' || event.key === 'Delete') {
+            scheduleCursorBroadcast();
+        }
+    });
+    ed.addEventListener('keydown', event => {
+        if (CURSOR_NAV_KEYS.has(event.key)) {
+            requestAnimationFrame(() => scheduleCursorBroadcast());
+        }
+    });
 }
-ed.addEventListener('keyup', sendCur);
-ed.addEventListener('mouseup', sendCur);
-ed.addEventListener('click', sendCur);
+
+document.addEventListener('selectionchange', () => {
+    if (document.activeElement === ed) {
+        scheduleCursorBroadcast();
+    }
+});
 
 ed.addEventListener('scroll', () => {
     gut.style.transform = 'translateY(-' + ed.scrollTop + 'px)';
     ov.scrollTop = ed.scrollTop;
     ov.scrollLeft = ed.scrollLeft;
     drawCurs();
+    hideCursorTooltip();
 });
 
 function updateGutter() {
@@ -830,18 +889,131 @@ function renderSegments() {
 }
 
 function drawCurs() {
+    if (!curs) return;
     curs.innerHTML = '';
+    hideCursorTooltip();
+
+    let caretHeight = 18;
+    if (ed && typeof window !== 'undefined') {
+        try {
+            const computed = window.getComputedStyle(ed);
+            const lh = parseFloat(computed.lineHeight);
+            if (!Number.isNaN(lh)) {
+                caretHeight = lh;
+            } else {
+                const fs = parseFloat(computed.fontSize);
+                if (!Number.isNaN(fs)) {
+                    caretHeight = fs * 1.4;
+                }
+            }
+        } catch (err) {
+            // Fallback to default caret height
+        }
+    }
+
     for (const id in peers) {
         const peer = peers[id];
+        if (!peer) continue;
         const xy = caretClientXY(peer.pos);
         const cursor = document.createElement('div');
         cursor.className = 'remote-cursor';
         cursor.style.background = peer.col;
         cursor.style.left = xy.x + 'px';
         cursor.style.top = xy.y + 'px';
+        cursor.style.height = caretHeight + 'px';
         cursor.dataset.name = peer.name || '';
+        cursor.dataset.peerId = id;
         cursor.title = peer.name || '';
         curs.appendChild(cursor);
+    }
+}
+
+function hideCursorTooltip() {
+    if (!cursorTooltip) return;
+    cursorTooltip.classList.remove('visible');
+    activeTooltipPeer = null;
+}
+
+function positionCursorTooltip(name, rect) {
+    if (!cursorTooltip || !wrapper) return;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2 - wrapperRect.left;
+    const top = rect.top - wrapperRect.top;
+    if (cursorTooltip.textContent !== name) {
+        cursorTooltip.textContent = name;
+    }
+    cursorTooltip.style.left = centerX + 'px';
+    cursorTooltip.style.top = top + 'px';
+    cursorTooltip.classList.add('visible');
+}
+
+function handleCursorHover(event) {
+    if (!cursorTooltip || !wrapper || !curs) return;
+    const { clientX, clientY } = event;
+    const marginX = CURSOR_TOOLTIP_MARGIN_X;
+    const marginY = CURSOR_TOOLTIP_MARGIN_Y;
+
+    let matched = null;
+    let matchedId = null;
+    for (const cursorEl of curs.children) {
+        const name = (cursorEl.dataset.name || '').trim();
+        if (!name) continue;
+        const rect = cursorEl.getBoundingClientRect();
+        if (
+            clientX >= rect.left - marginX &&
+            clientX <= rect.right + marginX &&
+            clientY >= rect.top - marginY &&
+            clientY <= rect.bottom + marginY
+        ) {
+            matched = { name, rect };
+            matchedId = cursorEl.dataset.peerId || null;
+            break;
+        }
+    }
+
+    if (matched) {
+        if (activeTooltipPeer !== matchedId) {
+            activeTooltipPeer = matchedId;
+        }
+        positionCursorTooltip(matched.name, matched.rect);
+    } else {
+        hideCursorTooltip();
+    }
+}
+
+function emitCursorPosition() {
+    if (!ed) return;
+    cursorEmitTimer = null;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const pos = typeof ed.selectionStart === 'number' ? ed.selectionStart : 0;
+    lastCursorEmit = now;
+    if (lastSentCursorPos === pos) {
+        return;
+    }
+    lastSentCursorPos = pos;
+    socket.emit('cur', { pos });
+}
+
+function scheduleCursorBroadcast(force = false) {
+    if (!ed) return;
+    if (force) {
+        lastCursorEmit = 0;
+        lastSentCursorPos = null;
+        if (cursorEmitTimer) {
+            clearTimeout(cursorEmitTimer);
+            cursorEmitTimer = null;
+        }
+    }
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const elapsed = now - lastCursorEmit;
+    if (force || elapsed >= CURSOR_THROTTLE_MS) {
+        emitCursorPosition();
+    } else {
+        if (cursorEmitTimer) {
+            clearTimeout(cursorEmitTimer);
+        }
+        cursorEmitTimer = setTimeout(emitCursorPosition, CURSOR_THROTTLE_MS - elapsed);
     }
 }
 
