@@ -31,6 +31,10 @@ const weatherForm = document.getElementById('weather-form');
 const weatherInput = document.getElementById('weather-query');
 const weatherList = document.getElementById('weather-list');
 const weatherMessage = document.getElementById('weather-message');
+const settingsToggle = document.getElementById('settings-toggle');
+const settingsPanel = document.getElementById('settings-panel');
+const settingsClose = document.getElementById('settings-close');
+const languageSelect = document.getElementById('language-select');
 const userLabel = document.querySelector('.app-user-label');
 const docEl = document.documentElement;
 
@@ -39,6 +43,7 @@ let myId = null;
 let lastText = '';
 let myName = '';
 let peers = {};
+let lastPresence = [];
 let segments = [];
 let workspaceId = 'main';
 let workspaceLabel = 'Main Workspace';
@@ -49,36 +54,396 @@ let workspaceBusy = false;
 const WEATHER_STORAGE_KEY = 'collab_weather_locations';
 let weatherLocations = [];
 
-const WEATHER_CODE_MAP = {
-    0: 'Clear sky',
-    1: 'Mainly clear',
-    2: 'Partly cloudy',
-    3: 'Overcast',
-    45: 'Fog',
-    48: 'Depositing rime fog',
-    51: 'Light drizzle',
-    53: 'Drizzle',
-    55: 'Heavy drizzle',
-    56: 'Freezing drizzle',
-    57: 'Freezing drizzle',
-    61: 'Light rain',
-    63: 'Rain',
-    65: 'Heavy rain',
-    66: 'Freezing rain',
-    67: 'Freezing rain',
-    71: 'Light snow',
-    73: 'Snow',
-    75: 'Heavy snow',
-    77: 'Snow grains',
-    80: 'Rain showers',
-    81: 'Rain showers',
-    82: 'Violent rain showers',
-    85: 'Snow showers',
-    86: 'Heavy snow showers',
-    95: 'Thunderstorm',
-    96: 'Thunderstorm with hail',
-    99: 'Thunderstorm with hail'
+const LANGUAGE_STORAGE_KEY = 'collab_language';
+const FALLBACK_LANGUAGE = 'en';
+let currentLanguage = FALLBACK_LANGUAGE;
+
+const translations = {
+    en: {
+        brandTitle: 'Collaborative Editor',
+        brandSubtitle: 'Write together in real time',
+        userLabel: 'You',
+        displayNameLabel: 'Display name',
+        displayNamePlaceholder: 'Set your name',
+        workspaceNew: 'New',
+        workspaceSave: 'Save',
+        workspaceDelete: 'Delete',
+        weatherTitle: 'Weather',
+        weatherAddLabel: 'Add location',
+        weatherAddPlaceholder: 'Add a city',
+        weatherAddAction: 'Add',
+        weatherToggleLabel: 'Toggle weather panel',
+        settingsTitle: 'Settings',
+        settingsSubtitle: 'Personalize your workspace',
+        settingsToggleLabel: 'Open settings',
+        settingsCloseLabel: 'Close settings',
+        languageLabel: 'Language',
+        languageEnglish: 'English',
+        languageGerman: 'Deutsch',
+        languageChinese: '中文',
+        statusWorkspace: 'Workspace',
+        statusWords: 'Words',
+        statusLines: 'Lines',
+        statusChars: 'Characters',
+        documentTitle: '{workspace} · Collaborative Editor',
+        themeToggleLight: 'Switch to light mode',
+        themeToggleDark: 'Switch to dark mode',
+        collaboratorFallback: 'Collaborator',
+        workspaceReady: 'Workspace ready',
+        workspaceSwitching: 'Switching…',
+        workspaceSwitchFailed: 'Unable to switch workspace',
+        workspaceSaving: 'Saving…',
+        workspaceSaveFailed: 'Save failed',
+        workspaceSaved: 'Saved',
+        workspaceCreatePrompt: 'Name for the new workspace',
+        workspaceCreateEmpty: 'Workspace name is required',
+        workspaceCreateCopyPrompt: 'Start from the current document?',
+        workspaceCreating: 'Creating…',
+        workspaceCreateFailed: 'Unable to create workspace',
+        workspaceOpenNew: 'Opening new workspace…',
+        workspaceCreated: 'Workspace created',
+        workspaceDeleteProtected: 'The primary workspace cannot be deleted',
+        workspaceDeleteConfirm: 'Delete this workspace? This action cannot be undone.',
+        workspaceDeleting: 'Deleting…',
+        workspaceDeleteFailed: 'Unable to delete workspace',
+        workspaceDeleted: 'Workspace deleted',
+        weatherPromptEmpty: 'Add a city to see its weather.',
+        weatherPromptEnter: 'Enter a city name to add it.',
+        weatherLoading: 'Loading…',
+        weatherRefresh: 'Refresh',
+        weatherRemove: 'Remove',
+        weatherRequestFailed: 'Weather request failed',
+        weatherNoData: 'No data available',
+        weatherUnableToLoad: 'Unable to load',
+        weatherLookingUp: 'Looking up city…',
+        weatherLookupFailed: 'Weather lookup failed. Try again later.',
+        weatherNoMatch: 'No matching locations found.',
+        weatherAdded: 'Added {location}',
+        weatherWind: 'Wind {speed} km/h',
+        weatherUpdated: 'Updated {time}',
+        weatherLocationFallback: 'Location',
+        weatherConditionsFallback: 'Conditions',
+        nameDefault: 'You',
+        nameWithValue: 'You · {name}',
+        weatherApiLanguage: 'en'
+    },
+    de: {
+        brandTitle: 'Gemeinsamer Editor',
+        brandSubtitle: 'Schreibe in Echtzeit zusammen',
+        userLabel: 'Du',
+        displayNameLabel: 'Anzeigename',
+        displayNamePlaceholder: 'Name festlegen',
+        workspaceNew: 'Neu',
+        workspaceSave: 'Speichern',
+        workspaceDelete: 'Löschen',
+        weatherTitle: 'Wetter',
+        weatherAddLabel: 'Ort hinzufügen',
+        weatherAddPlaceholder: 'Stadt hinzufügen',
+        weatherAddAction: 'Hinzufügen',
+        weatherToggleLabel: 'Wetterbereich umschalten',
+        settingsTitle: 'Einstellungen',
+        settingsSubtitle: 'Passe deinen Arbeitsbereich an',
+        settingsToggleLabel: 'Einstellungen öffnen',
+        settingsCloseLabel: 'Einstellungen schließen',
+        languageLabel: 'Sprache',
+        languageEnglish: 'English',
+        languageGerman: 'Deutsch',
+        languageChinese: '中文',
+        statusWorkspace: 'Arbeitsbereich',
+        statusWords: 'Wörter',
+        statusLines: 'Zeilen',
+        statusChars: 'Zeichen',
+        documentTitle: '{workspace} · Gemeinsamer Editor',
+        themeToggleLight: 'Zum Lichtmodus wechseln',
+        themeToggleDark: 'Zum Dunkelmodus wechseln',
+        collaboratorFallback: 'Mitarbeiter',
+        workspaceReady: 'Arbeitsbereich bereit',
+        workspaceSwitching: 'Wechsel wird vorbereitet…',
+        workspaceSwitchFailed: 'Arbeitsbereich konnte nicht gewechselt werden',
+        workspaceSaving: 'Speichern…',
+        workspaceSaveFailed: 'Speichern fehlgeschlagen',
+        workspaceSaved: 'Gespeichert',
+        workspaceCreatePrompt: 'Name für den neuen Arbeitsbereich',
+        workspaceCreateEmpty: 'Ein Name für den Arbeitsbereich ist erforderlich',
+        workspaceCreateCopyPrompt: 'Vom aktuellen Dokument starten?',
+        workspaceCreating: 'Erstelle…',
+        workspaceCreateFailed: 'Arbeitsbereich konnte nicht erstellt werden',
+        workspaceOpenNew: 'Neuer Arbeitsbereich wird geöffnet…',
+        workspaceCreated: 'Arbeitsbereich erstellt',
+        workspaceDeleteProtected: 'Der primäre Arbeitsbereich kann nicht gelöscht werden',
+        workspaceDeleteConfirm: 'Diesen Arbeitsbereich löschen? Dies kann nicht rückgängig gemacht werden.',
+        workspaceDeleting: 'Lösche…',
+        workspaceDeleteFailed: 'Arbeitsbereich konnte nicht gelöscht werden',
+        workspaceDeleted: 'Arbeitsbereich gelöscht',
+        weatherPromptEmpty: 'Füge eine Stadt hinzu, um das Wetter zu sehen.',
+        weatherPromptEnter: 'Gib eine Stadt ein, um sie hinzuzufügen.',
+        weatherLoading: 'Lade…',
+        weatherRefresh: 'Aktualisieren',
+        weatherRemove: 'Entfernen',
+        weatherRequestFailed: 'Wetterabruf fehlgeschlagen',
+        weatherNoData: 'Keine Daten verfügbar',
+        weatherUnableToLoad: 'Laden nicht möglich',
+        weatherLookingUp: 'Suche nach Stadt…',
+        weatherLookupFailed: 'Wetterabfrage fehlgeschlagen. Versuche es später erneut.',
+        weatherNoMatch: 'Keine passenden Orte gefunden.',
+        weatherAdded: '{location} hinzugefügt',
+        weatherWind: 'Wind {speed} km/h',
+        weatherUpdated: 'Aktualisiert {time}',
+        weatherLocationFallback: 'Ort',
+        weatherConditionsFallback: 'Bedingungen',
+        nameDefault: 'Du',
+        nameWithValue: 'Du · {name}',
+        weatherApiLanguage: 'de'
+    },
+    zh: {
+        brandTitle: '协同编辑器',
+        brandSubtitle: '实时一起写作',
+        userLabel: '你',
+        displayNameLabel: '显示名称',
+        displayNamePlaceholder: '设置你的名字',
+        workspaceNew: '新建',
+        workspaceSave: '保存',
+        workspaceDelete: '删除',
+        weatherTitle: '天气',
+        weatherAddLabel: '添加地点',
+        weatherAddPlaceholder: '添加城市',
+        weatherAddAction: '添加',
+        weatherToggleLabel: '切换天气面板',
+        settingsTitle: '设置',
+        settingsSubtitle: '个性化你的工作区',
+        settingsToggleLabel: '打开设置',
+        settingsCloseLabel: '关闭设置',
+        languageLabel: '语言',
+        languageEnglish: 'English',
+        languageGerman: 'Deutsch',
+        languageChinese: '中文',
+        statusWorkspace: '工作区',
+        statusWords: '词数',
+        statusLines: '行数',
+        statusChars: '字符',
+        documentTitle: '{workspace} · 协同编辑器',
+        themeToggleLight: '切换到亮色模式',
+        themeToggleDark: '切换到暗色模式',
+        collaboratorFallback: '协作者',
+        workspaceReady: '工作区已就绪',
+        workspaceSwitching: '正在切换…',
+        workspaceSwitchFailed: '无法切换工作区',
+        workspaceSaving: '正在保存…',
+        workspaceSaveFailed: '保存失败',
+        workspaceSaved: '已保存',
+        workspaceCreatePrompt: '新工作区名称',
+        workspaceCreateEmpty: '必须填写工作区名称',
+        workspaceCreateCopyPrompt: '从当前文档开始吗？',
+        workspaceCreating: '正在创建…',
+        workspaceCreateFailed: '无法创建工作区',
+        workspaceOpenNew: '正在打开新工作区…',
+        workspaceCreated: '工作区已创建',
+        workspaceDeleteProtected: '无法删除主工作区',
+        workspaceDeleteConfirm: '确定删除此工作区？此操作无法撤销。',
+        workspaceDeleting: '正在删除…',
+        workspaceDeleteFailed: '无法删除工作区',
+        workspaceDeleted: '工作区已删除',
+        weatherPromptEmpty: '添加城市以查看天气。',
+        weatherPromptEnter: '输入城市名称以添加。',
+        weatherLoading: '加载中…',
+        weatherRefresh: '刷新',
+        weatherRemove: '移除',
+        weatherRequestFailed: '天气请求失败',
+        weatherNoData: '暂无数据',
+        weatherUnableToLoad: '无法加载',
+        weatherLookingUp: '正在查找城市…',
+        weatherLookupFailed: '天气查询失败，请稍后再试。',
+        weatherNoMatch: '未找到匹配的地点。',
+        weatherAdded: '已添加 {location}',
+        weatherWind: '风速 {speed} 公里/小时',
+        weatherUpdated: '{time} 更新',
+        weatherLocationFallback: '地点',
+        weatherConditionsFallback: '天气',
+        nameDefault: '你',
+        nameWithValue: '你 · {name}',
+        weatherApiLanguage: 'zh'
+    }
 };
+
+const WEATHER_CODE_MAP = {
+    en: {
+        0: 'Clear sky',
+        1: 'Mainly clear',
+        2: 'Partly cloudy',
+        3: 'Overcast',
+        45: 'Fog',
+        48: 'Depositing rime fog',
+        51: 'Light drizzle',
+        53: 'Drizzle',
+        55: 'Heavy drizzle',
+        56: 'Freezing drizzle',
+        57: 'Freezing drizzle',
+        61: 'Light rain',
+        63: 'Rain',
+        65: 'Heavy rain',
+        66: 'Freezing rain',
+        67: 'Freezing rain',
+        71: 'Light snow',
+        73: 'Snow',
+        75: 'Heavy snow',
+        77: 'Snow grains',
+        80: 'Rain showers',
+        81: 'Rain showers',
+        82: 'Violent rain showers',
+        85: 'Snow showers',
+        86: 'Heavy snow showers',
+        95: 'Thunderstorm',
+        96: 'Thunderstorm with hail',
+        99: 'Thunderstorm with hail'
+    },
+    de: {
+        0: 'Klarer Himmel',
+        1: 'Überwiegend klar',
+        2: 'Teilweise bewölkt',
+        3: 'Bedeckt',
+        45: 'Nebel',
+        48: 'Raureifnebel',
+        51: 'Leichter Nieselregen',
+        53: 'Nieselregen',
+        55: 'Starker Nieselregen',
+        56: 'Gefrierender Nieselregen',
+        57: 'Gefrierender Nieselregen',
+        61: 'Leichter Regen',
+        63: 'Regen',
+        65: 'Starker Regen',
+        66: 'Gefrierender Regen',
+        67: 'Gefrierender Regen',
+        71: 'Leichter Schneefall',
+        73: 'Schneefall',
+        75: 'Starker Schneefall',
+        77: 'Schneegriesel',
+        80: 'Regenschauer',
+        81: 'Regenschauer',
+        82: 'Heftige Regenschauer',
+        85: 'Schneeschauer',
+        86: 'Starke Schneeschauer',
+        95: 'Gewitter',
+        96: 'Gewitter mit Hagel',
+        99: 'Gewitter mit Hagel'
+    },
+    zh: {
+        0: '晴朗',
+        1: '多云转晴',
+        2: '局部多云',
+        3: '阴天',
+        45: '雾',
+        48: '霜雾',
+        51: '小毛雨',
+        53: '毛毛雨',
+        55: '大毛雨',
+        56: '冻毛雨',
+        57: '冻毛雨',
+        61: '小雨',
+        63: '中雨',
+        65: '大雨',
+        66: '冻雨',
+        67: '冻雨',
+        71: '小雪',
+        73: '中雪',
+        75: '大雪',
+        77: '霰',
+        80: '阵雨',
+        81: '阵雨',
+        82: '暴雨',
+        85: '阵雪',
+        86: '大阵雪',
+        95: '雷暴',
+        96: '雷暴伴冰雹',
+        99: '雷暴伴冰雹'
+    }
+};
+
+function dictFor(language) {
+    return translations[language] || translations[FALLBACK_LANGUAGE];
+}
+
+function t(key, vars = {}) {
+    const dict = dictFor(currentLanguage);
+    const fallback = dictFor(FALLBACK_LANGUAGE);
+    let template = dict[key];
+    if (template === undefined) {
+        template = fallback[key] ?? key;
+    }
+    if (typeof template !== 'string') {
+        return template;
+    }
+    return template.replace(/\{(\w+)\}/g, (match, token) => {
+        if (Object.prototype.hasOwnProperty.call(vars, token)) {
+            return vars[token];
+        }
+        return match;
+    });
+}
+
+function applyTranslations() {
+    const nodes = document.querySelectorAll('[data-i18n-key]');
+    nodes.forEach(node => {
+        const key = node.dataset.i18nKey;
+        if (!key) return;
+        const attr = node.dataset.i18nAttr;
+        const value = t(key);
+        if (attr) {
+            node.setAttribute(attr, value);
+        } else {
+            node.textContent = value;
+        }
+    });
+    updateThemeToggle(docEl.dataset.theme === 'light' ? 'light' : 'dark');
+    updateParticipants(lastPresence);
+    renderWeatherLocations();
+    updateWorkspaceStatus();
+}
+
+function setLanguage(language) {
+    const normalized = translations[language] ? language : FALLBACK_LANGUAGE;
+    currentLanguage = normalized;
+    document.documentElement.lang = normalized;
+    if (languageSelect) {
+        languageSelect.value = normalized;
+    }
+    try {
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, normalized);
+    } catch (err) {
+        // ignore storage issues
+    }
+    applyTranslations();
+}
+
+function initLanguage() {
+    let preferred = FALLBACK_LANGUAGE;
+    try {
+        const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+        if (stored && translations[stored]) {
+            preferred = stored;
+        }
+    } catch (err) {
+        preferred = FALLBACK_LANGUAGE;
+    }
+    setLanguage(preferred);
+}
+
+function openSettings() {
+    if (settingsPanel) {
+        settingsPanel.removeAttribute('hidden');
+    }
+    if (settingsToggle) {
+        settingsToggle.setAttribute('aria-expanded', 'true');
+    }
+}
+
+function closeSettings() {
+    if (settingsPanel) {
+        settingsPanel.setAttribute('hidden', '');
+    }
+    if (settingsToggle) {
+        settingsToggle.setAttribute('aria-expanded', 'false');
+    }
+}
 
 const ro = new ResizeObserver(() => {
     if (wrapper) {
@@ -88,6 +453,8 @@ const ro = new ResizeObserver(() => {
 if (wrapper) {
     ro.observe(wrapper);
 }
+
+initLanguage();
 
 if (themeToggle) {
     const initialTheme = docEl.dataset.theme === 'light' ? 'light' : 'dark';
@@ -132,7 +499,7 @@ if (weatherToggle && weatherPanel) {
             weatherPanel.removeAttribute('hidden');
             weatherToggle.setAttribute('aria-expanded', 'true');
             if (!weatherLocations.length) {
-                showWeatherMessage('Add a city to see its weather.');
+                showWeatherMessage(t('weatherPromptEmpty'));
             }
             refreshWeather();
         } else {
@@ -147,7 +514,7 @@ if (weatherForm) {
         event.preventDefault();
         const query = weatherInput ? weatherInput.value.trim() : '';
         if (!query) {
-            showWeatherMessage('Enter a city name to add it.', 'error');
+            showWeatherMessage(t('weatherPromptEnter'), 'error');
             return;
         }
         addWeatherLocation(query);
@@ -175,6 +542,42 @@ if (weatherList) {
     weatherLocations = loadWeatherLocations();
     renderWeatherLocations();
 }
+
+if (settingsToggle && settingsPanel) {
+    settingsToggle.addEventListener('click', () => {
+        const hidden = settingsPanel.hasAttribute('hidden');
+        if (hidden) {
+            openSettings();
+        } else {
+            closeSettings();
+        }
+    });
+}
+
+if (settingsClose) {
+    settingsClose.addEventListener('click', () => {
+        closeSettings();
+    });
+}
+
+if (languageSelect) {
+    languageSelect.addEventListener('change', event => {
+        setLanguage(event.target.value);
+    });
+}
+
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && settingsPanel && !settingsPanel.hasAttribute('hidden')) {
+        closeSettings();
+    }
+});
+
+document.addEventListener('click', event => {
+    if (!settingsPanel || settingsPanel.hasAttribute('hidden')) return;
+    if (settingsPanel.contains(event.target)) return;
+    if (settingsToggle && settingsToggle.contains(event.target)) return;
+    closeSettings();
+});
 
 function caretClientXY(pos) {
     const before = esc(ed.value.substring(0, pos)).replace(/\n/g, '<br>');
@@ -254,6 +657,20 @@ socket.on('init', data => {
 });
 
 socket.on('sync', data => {
+    const isSelf = data.from === myId;
+    const nextSegments = data.segments || [];
+
+    if (isSelf) {
+        segments = nextSegments;
+        meas.textContent = ed.value;
+        lastText = ed.value;
+        updateGutter();
+        renderSegments();
+        drawCurs();
+        updateStatusBar();
+        return;
+    }
+
     const hadFocus = document.activeElement === ed;
     const prevSelStart = ed.selectionStart;
     const prevSelEnd = ed.selectionEnd;
@@ -263,14 +680,14 @@ socket.on('sync', data => {
 
     ed.value = data.text;
     lastText = data.text;
-    segments = data.segments || [];
+    segments = nextSegments;
     meas.textContent = ed.value;
 
     if (hadFocus) {
         let nextStart = prevSelStart;
         let nextEnd = prevSelEnd;
         const change = data.change;
-        if (change && data.from !== myId) {
+        if (change) {
             const { start, old_end, new_end } = change;
             const oldLen = old_end - start;
             const newLen = new_end - start;
@@ -348,7 +765,7 @@ socket.on('workspace_switched', data => {
     drawCurs();
     updateStatusBar();
     setWorkspaceBusy(false);
-    showWorkspaceNote('Workspace ready', 'success');
+    showWorkspaceNote(t('workspaceReady'), 'success');
 });
 
 ed.addEventListener('input', () => {
@@ -438,7 +855,8 @@ function esc(value) {
 function updateThemeToggle(theme) {
     if (!themeToggle) return;
     themeToggle.textContent = theme === 'dark' ? '☀️' : '🌙';
-    themeToggle.setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+    const key = theme === 'dark' ? 'themeToggleLight' : 'themeToggleDark';
+    themeToggle.setAttribute('aria-label', t(key));
 }
 
 function applyTheme(theme) {
@@ -465,12 +883,13 @@ function updateSelfName(name) {
         nameInput.value = name;
     }
     if (userLabel) {
-        userLabel.textContent = name ? `You · ${name}` : 'You';
+        userLabel.textContent = name ? t('nameWithValue', { name }) : t('nameDefault');
     }
 }
 
 function updateParticipants(list) {
-    if (!Array.isArray(list)) return;
+    if (!Array.isArray(list)) list = [];
+    lastPresence = list;
 
     const seen = new Set();
     const selfId = myId;
@@ -492,7 +911,7 @@ function updateParticipants(list) {
         peers[user.id] = {
             pos: hasPos ? existing.pos : 0,
             col: user.color ?? existing.col ?? '#3b82f6',
-            name: user.name ?? existing.name ?? 'Collaborator'
+            name: user.name ?? existing.name ?? t('collaboratorFallback')
         };
         seen.add(user.id);
     }
@@ -510,7 +929,7 @@ function updateParticipants(list) {
             const item = document.createElement('span');
             item.className = 'participant';
             item.style.setProperty('--participant-color', user.color || '#6b7280');
-            item.textContent = user.name || 'Collaborator';
+            item.textContent = user.name || t('collaboratorFallback');
             participants.appendChild(item);
         }
     }
@@ -584,7 +1003,7 @@ function updateWorkspaceStatus(note, tone) {
     if (workspaceNameEl) {
         workspaceNameEl.textContent = workspaceLabel;
     }
-    document.title = `${workspaceLabel} · Collaborative Editor`;
+    document.title = t('documentTitle', { workspace: workspaceLabel });
     if (typeof note !== 'undefined') {
         showWorkspaceNote(note, tone);
     }
@@ -633,13 +1052,13 @@ async function selectWorkspace(nextId) {
         });
         const payload = await res.json().catch(() => ({}));
         if (!res.ok) {
-            throw new Error(payload.error || 'Unable to switch workspace');
+            throw new Error(payload.error || t('workspaceSwitchFailed'));
         }
-        showWorkspaceNote('Switching…');
+        showWorkspaceNote(t('workspaceSwitching'));
         socket.emit('switch_workspace', { workspace: nextId });
     } catch (err) {
         console.error(err);
-        showWorkspaceNote(err.message || 'Unable to switch workspace', 'error');
+        showWorkspaceNote(err.message || t('workspaceSwitchFailed'), 'error');
         setWorkspaceBusy(false);
         populateWorkspaceSelect(workspaceList, workspaceId);
     }
@@ -648,7 +1067,7 @@ async function selectWorkspace(nextId) {
 async function saveWorkspace() {
     if (workspaceBusy) return;
     setWorkspaceBusy(true);
-    showWorkspaceNote('Saving…');
+    showWorkspaceNote(t('workspaceSaving'));
     try {
         const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
             method: 'PUT',
@@ -658,7 +1077,7 @@ async function saveWorkspace() {
         });
         const payload = await res.json().catch(() => ({}));
         if (!res.ok) {
-            throw new Error(payload.error || 'Unable to save workspace');
+            throw new Error(payload.error || t('workspaceSaveFailed'));
         }
         const updated = payload.workspace || {};
         if (updated.name) {
@@ -666,10 +1085,10 @@ async function saveWorkspace() {
         }
         workspaceList = Array.isArray(payload.workspaces) ? payload.workspaces : workspaceList;
         populateWorkspaceSelect(workspaceList, workspaceId);
-        updateWorkspaceStatus('Saved', 'success');
+        updateWorkspaceStatus(t('workspaceSaved'), 'success');
     } catch (err) {
         console.error(err);
-        showWorkspaceNote(err.message || 'Save failed', 'error');
+        showWorkspaceNote(err.message || t('workspaceSaveFailed'), 'error');
     } finally {
         setWorkspaceBusy(false);
     }
@@ -677,16 +1096,16 @@ async function saveWorkspace() {
 
 async function createWorkspace() {
     if (workspaceBusy) return;
-    const name = prompt('Name for the new workspace', '');
+    const name = prompt(t('workspaceCreatePrompt'), '');
     if (name === null) return;
     const cleaned = name.trim().slice(0, 48);
     if (!cleaned) {
-        showWorkspaceNote('Workspace name is required', 'error');
+        showWorkspaceNote(t('workspaceCreateEmpty'), 'error');
         return;
     }
-    const copy = confirm('Start from the current document?');
+    const copy = confirm(t('workspaceCreateCopyPrompt'));
     setWorkspaceBusy(true);
-    showWorkspaceNote('Creating…');
+    showWorkspaceNote(t('workspaceCreating'));
     try {
         const payload = { name: cleaned };
         if (copy) payload.copy_from = workspaceId;
@@ -698,22 +1117,22 @@ async function createWorkspace() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            throw new Error(data.error || 'Unable to create workspace');
+            throw new Error(data.error || t('workspaceCreateFailed'));
         }
         workspaceList = Array.isArray(data.workspaces) ? data.workspaces : workspaceList;
         populateWorkspaceSelect(workspaceList, workspaceId);
         setWorkspaceBusy(false);
         const created = data.workspace || {};
         if (created.id) {
-            showWorkspaceNote('Opening new workspace…');
+            showWorkspaceNote(t('workspaceOpenNew'));
             selectWorkspace(created.id);
         } else {
-            showWorkspaceNote('Workspace created', 'success');
+            showWorkspaceNote(t('workspaceCreated'), 'success');
         }
     } catch (err) {
         setWorkspaceBusy(false);
         console.error(err);
-        showWorkspaceNote(err.message || 'Unable to create workspace', 'error');
+        showWorkspaceNote(err.message || t('workspaceCreateFailed'), 'error');
     }
 }
 
@@ -722,13 +1141,13 @@ async function deleteWorkspace() {
     const target = workspaceSelect ? workspaceSelect.value : workspaceId;
     if (!target) return;
     if (target === 'main') {
-        showWorkspaceNote('The primary workspace cannot be deleted', 'error');
+        showWorkspaceNote(t('workspaceDeleteProtected'), 'error');
         return;
     }
-    const confirmed = confirm('Delete this workspace? This action cannot be undone.');
+    const confirmed = confirm(t('workspaceDeleteConfirm'));
     if (!confirmed) return;
     setWorkspaceBusy(true);
-    showWorkspaceNote('Deleting…');
+    showWorkspaceNote(t('workspaceDeleting'));
     try {
         const res = await fetch(`/api/workspaces/${encodeURIComponent(target)}`, {
             method: 'DELETE',
@@ -737,7 +1156,7 @@ async function deleteWorkspace() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            throw new Error(data.error || 'Unable to delete workspace');
+            throw new Error(data.error || t('workspaceDeleteFailed'));
         }
         workspaceList = Array.isArray(data.workspaces) ? data.workspaces : [];
         let nextId = workspaceId;
@@ -749,12 +1168,12 @@ async function deleteWorkspace() {
         if (target === workspaceId) {
             selectWorkspace(nextId);
         } else {
-            showWorkspaceNote('Workspace deleted', 'success');
+            showWorkspaceNote(t('workspaceDeleted'), 'success');
         }
     } catch (err) {
         setWorkspaceBusy(false);
         console.error(err);
-        showWorkspaceNote(err.message || 'Unable to delete workspace', 'error');
+        showWorkspaceNote(err.message || t('workspaceDeleteFailed'), 'error');
         populateWorkspaceSelect(workspaceList, workspaceId);
     }
 }
@@ -790,10 +1209,10 @@ function loadWeatherLocations() {
                 name: loc.name,
                 country: loc.country,
                 latitude: Number(loc.latitude),
-                longitude: Number(loc.longitude),
-                label: loc.label || buildWeatherLabel(loc)
+                longitude: Number(loc.longitude)
             }))
-            .filter(loc => !Number.isNaN(loc.latitude) && !Number.isNaN(loc.longitude));
+            .filter(loc => !Number.isNaN(loc.latitude) && !Number.isNaN(loc.longitude))
+            .map(loc => ({ ...loc, label: buildWeatherLabel(loc) }));
     } catch (err) {
         return [];
     }
@@ -807,7 +1226,7 @@ function saveWeatherLocations() {
             country: loc.country,
             latitude: loc.latitude,
             longitude: loc.longitude,
-            label: loc.label || buildWeatherLabel(loc)
+            label: buildWeatherLabel(loc)
         }));
         localStorage.setItem(WEATHER_STORAGE_KEY, JSON.stringify(payload));
     } catch (err) {
@@ -819,11 +1238,13 @@ function renderWeatherLocations() {
     if (!weatherList) return;
     weatherList.innerHTML = '';
     if (!weatherLocations.length) {
-        showWeatherMessage('Add a city to see its weather.');
+        showWeatherMessage(t('weatherPromptEmpty'));
         return;
     }
     showWeatherMessage('');
     for (const location of weatherLocations) {
+        const label = buildWeatherLabel(location);
+        location.label = label;
         const item = document.createElement('li');
         item.className = 'weather-item';
         item.dataset.id = location.id;
@@ -832,10 +1253,10 @@ function renderWeatherLocations() {
         meta.className = 'weather-meta';
         const title = document.createElement('span');
         title.className = 'weather-title';
-        title.textContent = location.label || buildWeatherLabel(location);
+        title.textContent = label;
         const details = document.createElement('span');
         details.className = 'weather-details';
-        details.textContent = 'Loading…';
+        details.textContent = t('weatherLoading');
         meta.appendChild(title);
         meta.appendChild(details);
 
@@ -844,14 +1265,14 @@ function renderWeatherLocations() {
         const refreshBtn = document.createElement('button');
         refreshBtn.type = 'button';
         refreshBtn.className = 'weather-refresh';
-        refreshBtn.textContent = 'Refresh';
+        refreshBtn.textContent = t('weatherRefresh');
         refreshBtn.addEventListener('click', () => {
             updateWeatherItem(location, details, item);
         });
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.className = 'weather-remove';
-        removeBtn.textContent = 'Remove';
+        removeBtn.textContent = t('weatherRemove');
         removeBtn.addEventListener('click', () => {
             removeWeatherLocation(location.id);
         });
@@ -868,44 +1289,48 @@ function renderWeatherLocations() {
 async function updateWeatherItem(location, detailsEl, itemEl) {
     if (!detailsEl) return;
     itemEl?.classList.remove('error');
-    detailsEl.textContent = 'Loading…';
+    detailsEl.textContent = t('weatherLoading');
     try {
         const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current_weather=true&timezone=auto`;
         const res = await fetch(url);
         if (!res.ok) {
-            throw new Error('Weather request failed');
+            throw new Error(t('weatherRequestFailed'));
         }
         const data = await res.json();
         const current = data.current_weather;
         if (!current) {
-            detailsEl.textContent = 'No data available';
+            detailsEl.textContent = t('weatherNoData');
             return;
         }
         const temp = Math.round(current.temperature);
         const wind = Math.round(current.windspeed);
         const desc = describeWeather(current.weathercode);
         const timeText = formatWeatherTime(current.time);
-        const parts = [`${temp}°C`, desc, `Wind ${wind} km/h`];
+        const parts = [`${temp}°C`, desc];
+        if (!Number.isNaN(wind)) {
+            parts.push(t('weatherWind', { speed: wind }));
+        }
         if (timeText) parts.push(timeText);
         detailsEl.textContent = parts.join(' • ');
     } catch (err) {
         console.error(err);
-        detailsEl.textContent = 'Unable to load';
+        detailsEl.textContent = t('weatherUnableToLoad');
         itemEl?.classList.add('error');
     }
 }
 
 async function addWeatherLocation(query) {
-    showWeatherMessage('Looking up city…');
+    showWeatherMessage(t('weatherLookingUp'));
     try {
-        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`;
+        const lang = dictFor(currentLanguage).weatherApiLanguage || 'en';
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=${lang}&format=json`;
         const res = await fetch(url);
         if (!res.ok) {
             throw new Error('Lookup failed');
         }
         const data = await res.json();
         if (!data.results || !data.results.length) {
-            showWeatherMessage('No matching locations found.', 'error');
+            showWeatherMessage(t('weatherNoMatch'), 'error');
             return;
         }
         const result = data.results[0];
@@ -922,11 +1347,11 @@ async function addWeatherLocation(query) {
         if (weatherInput) {
             weatherInput.value = '';
         }
-        showWeatherMessage(`Added ${location.label}`, 'success');
+        showWeatherMessage(t('weatherAdded', { location: location.label }), 'success');
         renderWeatherLocations();
     } catch (err) {
         console.error(err);
-        showWeatherMessage('Weather lookup failed. Try again later.', 'error');
+        showWeatherMessage(t('weatherLookupFailed'), 'error');
     }
 }
 
@@ -935,7 +1360,7 @@ function removeWeatherLocation(id) {
     saveWeatherLocations();
     renderWeatherLocations();
     if (!weatherLocations.length) {
-        showWeatherMessage('Add a city to see its weather.');
+        showWeatherMessage(t('weatherPromptEmpty'));
     }
 }
 
@@ -963,19 +1388,22 @@ function showWeatherMessage(message, tone = 'info') {
 }
 
 function describeWeather(code) {
-    return WEATHER_CODE_MAP[code] || 'Conditions';
+    const dict = WEATHER_CODE_MAP[currentLanguage] || WEATHER_CODE_MAP[FALLBACK_LANGUAGE] || {};
+    const fallback = WEATHER_CODE_MAP[FALLBACK_LANGUAGE] || {};
+    return dict[code] || fallback[code] || t('weatherConditionsFallback');
 }
 
 function formatWeatherTime(iso) {
     if (!iso) return '';
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return '';
-    return `Updated ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return t('weatherUpdated', { time });
 }
 
 function buildWeatherLabel(loc) {
     if (!loc) return '';
-    const name = loc.name || 'Location';
+    const name = loc.name || t('weatherLocationFallback');
     const country = loc.country ? `, ${loc.country}` : '';
     return `${name}${country}`;
 }
