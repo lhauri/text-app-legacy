@@ -35,6 +35,7 @@ const settingsToggle = document.getElementById('settings-toggle');
 const settingsPanel = document.getElementById('settings-panel');
 const settingsClose = document.getElementById('settings-close');
 const languageSelect = document.getElementById('language-select');
+const workspaceControls = document.querySelector('.workspace-controls');
 const userLabel = document.querySelector('.app-user-label');
 const docEl = document.documentElement;
 const cursorTooltip = wrapper ? (() => {
@@ -121,6 +122,11 @@ const translations = {
         workspaceDeleting: 'Deleting…',
         workspaceDeleteFailed: 'Unable to delete workspace',
         workspaceDeleted: 'Workspace deleted',
+        workspaceSelectPlaceholder: 'Select a workspace…',
+        workspaceSelectEmpty: 'No saved workspaces yet',
+        workspaceActiveIndicator: 'current',
+        participantsLabel: 'Participants',
+        participantsEmpty: 'No collaborators yet',
         weatherPromptEmpty: 'Add a city to see its weather.',
         weatherPromptEnter: 'Enter a city name to add it.',
         weatherLoading: 'Loading…',
@@ -189,6 +195,11 @@ const translations = {
         workspaceDeleting: 'Lösche…',
         workspaceDeleteFailed: 'Arbeitsbereich konnte nicht gelöscht werden',
         workspaceDeleted: 'Arbeitsbereich gelöscht',
+        workspaceSelectPlaceholder: 'Arbeitsbereich wählen…',
+        workspaceSelectEmpty: 'Noch keine Arbeitsbereiche',
+        workspaceActiveIndicator: 'aktiv',
+        participantsLabel: 'Teilnehmende',
+        participantsEmpty: 'Keine weiteren Teilnehmenden',
         weatherPromptEmpty: 'Füge eine Stadt hinzu, um das Wetter zu sehen.',
         weatherPromptEnter: 'Gib eine Stadt ein, um sie hinzuzufügen.',
         weatherLoading: 'Lade…',
@@ -257,6 +268,11 @@ const translations = {
         workspaceDeleting: '正在删除…',
         workspaceDeleteFailed: '无法删除工作区',
         workspaceDeleted: '工作区已删除',
+        workspaceSelectPlaceholder: '选择工作区…',
+        workspaceSelectEmpty: '尚未保存工作区',
+        workspaceActiveIndicator: '当前',
+        participantsLabel: '参与者',
+        participantsEmpty: '暂无其他协作者',
         weatherPromptEmpty: '添加城市以查看天气。',
         weatherPromptEnter: '输入城市名称以添加。',
         weatherLoading: '加载中…',
@@ -411,6 +427,7 @@ function applyTranslations() {
     updateParticipants(lastPresence);
     renderWeatherLocations();
     updateWorkspaceStatus();
+    populateWorkspaceSelect(workspaceList, workspaceId);
 }
 
 function setLanguage(language) {
@@ -482,9 +499,11 @@ if (themeToggle) {
 if (workspaceSelect) {
     workspaceSelect.addEventListener('change', event => {
         const next = event.target.value;
-        if (next) {
-            selectWorkspace(next);
+        if (!next) {
+            populateWorkspaceSelect(workspaceList, workspaceId);
+            return;
         }
+        selectWorkspace(next);
     });
 }
 
@@ -665,7 +684,7 @@ socket.on('init', data => {
     const text = data.text || '';
     ed.value = text;
     lastText = text;
-    segments = data.segments || [];
+    segments = normalizeSegments(data.segments || []);
     meas.textContent = text;
     peers = {};
     updateParticipants(data.users || []);
@@ -678,10 +697,10 @@ socket.on('init', data => {
 
 socket.on('sync', data => {
     const isSelf = data.from === myId;
-    const nextSegments = data.segments || [];
+    const incomingSegments = data.segments || [];
 
     if (isSelf) {
-        segments = nextSegments;
+        segments = normalizeSegments(incomingSegments);
         meas.textContent = ed.value;
         lastText = ed.value;
         updateGutter();
@@ -700,7 +719,7 @@ socket.on('sync', data => {
 
     ed.value = data.text;
     lastText = data.text;
-    segments = nextSegments;
+    segments = normalizeSegments(incomingSegments);
     meas.textContent = ed.value;
 
     if (hadFocus) {
@@ -774,7 +793,7 @@ socket.on('workspace_switched', data => {
     const hadFocus = document.activeElement === ed;
     ed.value = text;
     lastText = text;
-    segments = data.segments || [];
+    segments = normalizeSegments(data.segments || []);
     meas.textContent = text;
     if (hadFocus) {
         const pos = Math.min(ed.value.length, ed.selectionStart);
@@ -803,6 +822,7 @@ ed.addEventListener('input', () => {
 
     socket.emit('edit', { text: txt, range: { s, e: newE } });
 
+    applyLocalSegmentsEdit(s, oldE, newE);
     lastText = txt;
     meas.textContent = txt;
     updateGutter();
@@ -870,7 +890,91 @@ function updateGutter() {
     gut.innerHTML = Array.from({ length: n }, (_, i) => i + 1).join('\n');
 }
 
+function normalizeSegments(list = []) {
+    if (!Array.isArray(list) || !list.length) return [];
+    const textLength = ed ? ed.value.length : 0;
+    const sanitized = list
+        .map(seg => {
+            if (!seg) return null;
+            const rawStart = Number(seg.start);
+            const rawEnd = Number(seg.end);
+            const start = Number.isFinite(rawStart) ? rawStart : 0;
+            const end = Number.isFinite(rawEnd) ? rawEnd : start;
+            const safeStart = Math.max(0, Math.min(textLength, Math.min(start, end)));
+            const safeEnd = Math.max(0, Math.min(textLength, Math.max(start, end)));
+            if (safeEnd <= safeStart) return null;
+            const color = typeof seg.color === 'string' && seg.color.trim() ? seg.color : '#3b82f6';
+            return { start: safeStart, end: safeEnd, color };
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+            if (a.start === b.start) {
+                return a.end - b.end;
+            }
+            return a.start - b.start;
+        });
+
+    const merged = [];
+    for (const seg of sanitized) {
+        const last = merged[merged.length - 1];
+        if (last && seg.start <= last.end) {
+            if (last.color === seg.color) {
+                last.end = Math.max(last.end, seg.end);
+            } else {
+                const clippedStart = Math.max(last.end, seg.start);
+                if (clippedStart < seg.end) {
+                    merged.push({ start: clippedStart, end: seg.end, color: seg.color });
+                }
+            }
+        } else {
+            merged.push({ ...seg });
+        }
+    }
+    return merged;
+}
+
+function applyLocalSegmentsEdit(start, oldEnd, newEnd) {
+    if (!Number.isFinite(start) || !Number.isFinite(oldEnd) || !Number.isFinite(newEnd)) {
+        return;
+    }
+    let safeStart = Math.max(0, Math.floor(start));
+    let safeOldEnd = Math.max(safeStart, Math.floor(oldEnd));
+    let safeNewEnd = Math.max(safeStart, Math.floor(newEnd));
+    const current = normalizeSegments(segments);
+    const newLen = safeNewEnd - safeStart;
+    const shift = newLen - (safeOldEnd - safeStart);
+    const next = [];
+
+    for (const seg of current) {
+        if (seg.end <= safeStart) {
+            next.push({ ...seg });
+        } else if (seg.start >= safeOldEnd) {
+            next.push({
+                start: seg.start + shift,
+                end: seg.end + shift,
+                color: seg.color
+            });
+        } else if (seg.start >= safeStart && seg.end <= safeOldEnd) {
+            continue;
+        } else {
+            const newStart = seg.start < safeStart ? seg.start : safeStart;
+            const newSegEnd = seg.end > safeOldEnd ? seg.end : safeOldEnd;
+            const adjustedEnd = newSegEnd + shift;
+            if (adjustedEnd > newStart) {
+                next.push({ start: newStart, end: adjustedEnd, color: seg.color });
+            }
+        }
+    }
+
+    if (safeNewEnd > safeStart) {
+        next.push({ start: safeStart, end: safeNewEnd, color: myCol });
+    }
+
+    segments = normalizeSegments(next);
+}
+
 function renderSegments() {
+    segments = normalizeSegments(segments);
     if (!segments.length) {
         ov.innerHTML = esc(ed.value);
         return;
@@ -1096,14 +1200,29 @@ function updateParticipants(list) {
 
     if (participants) {
         participants.innerHTML = '';
+        const label = document.createElement('span');
+        label.className = 'participants-label';
+        label.textContent = t('participantsLabel');
+        participants.appendChild(label);
+
+        let visibleCount = 0;
         for (const user of list) {
             if (!user || user.id === myId) continue;
+            visibleCount++;
             const item = document.createElement('span');
             item.className = 'participant';
             item.style.setProperty('--participant-color', user.color || '#6b7280');
             item.textContent = user.name || t('collaboratorFallback');
             participants.appendChild(item);
         }
+
+        if (!visibleCount) {
+            const placeholder = document.createElement('span');
+            placeholder.className = 'participants-empty';
+            placeholder.textContent = t('participantsEmpty');
+            participants.appendChild(placeholder);
+        }
+        participants.dataset.count = String(visibleCount);
     }
 
     drawCurs();
@@ -1147,19 +1266,44 @@ function updateStatusBar() {
 
 function populateWorkspaceSelect(list = [], active = workspaceId) {
     if (!workspaceSelect) return;
+    const entries = Array.isArray(list) ? list.filter(ws => ws && ws.id) : [];
+    const sorted = entries
+        .slice()
+        .sort((a, b) => {
+            const labelA = (a.name || a.id || '').toString();
+            const labelB = (b.name || b.id || '').toString();
+            return labelA.localeCompare(labelB, undefined, { sensitivity: 'base' });
+        });
+
     workspaceSelect.innerHTML = '';
-    for (const ws of list) {
-        if (!ws || !ws.id) continue;
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.textContent = sorted.length ? t('workspaceSelectPlaceholder') : t('workspaceSelectEmpty');
+    workspaceSelect.appendChild(placeholder);
+
+    let hasActive = false;
+    for (const ws of sorted) {
         const option = document.createElement('option');
         option.value = ws.id;
-        option.textContent = ws.name || ws.id;
+        const label = ws.name || ws.id;
+        option.dataset.label = label;
+        option.textContent = label;
         if (ws.id === active) {
+            hasActive = true;
             option.selected = true;
+            option.textContent = `${label} · ${t('workspaceActiveIndicator')}`;
         }
         workspaceSelect.appendChild(option);
     }
-    if (workspaceSelect.options.length && !Array.from(workspaceSelect.options).some(opt => opt.value === active)) {
-        workspaceSelect.selectedIndex = 0;
+
+    placeholder.selected = !hasActive;
+    workspaceSelect.dataset.hasActive = hasActive ? 'true' : 'false';
+    if (hasActive) {
+        workspaceSelect.value = active;
+    } else {
+        workspaceSelect.value = '';
     }
 }
 
@@ -1169,6 +1313,12 @@ function setWorkspaceBusy(state) {
     controls.forEach(ctrl => {
         if (ctrl) ctrl.disabled = state;
     });
+    if (workspaceControls) {
+        workspaceControls.setAttribute('data-busy', state ? 'true' : 'false');
+    }
+    if (workspaceSelect) {
+        workspaceSelect.setAttribute('aria-busy', state ? 'true' : 'false');
+    }
 }
 
 function updateWorkspaceStatus(note, tone) {
