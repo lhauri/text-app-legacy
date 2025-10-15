@@ -3,6 +3,7 @@ Real-time Collaborative Text Editor
 Local:  python app.py
 Render: gunicorn -k eventlet -w 1 --timeout 90 wsgi:app
 """
+import copy
 import os
 from datetime import timedelta
 from typing import Optional
@@ -184,7 +185,11 @@ def create_workspace():
     workspaces[workspace_id] = new_workspace_payload(name)
     if base:
         workspaces[workspace_id]["text"] = base.get("text", DEFAULT_TEXT)
-        workspaces[workspace_id]["segments"] = base.get("segments", [])
+        segments = base.get("segments")
+        if isinstance(segments, list):
+            workspaces[workspace_id]["segments"] = copy.deepcopy(segments)
+        else:
+            workspaces[workspace_id]["segments"] = []
         workspaces[workspace_id]["version"] = base.get("version", 0)
 
     return (
