@@ -318,7 +318,9 @@ def on_connect():
             "workspace": {
                 "id": workspace_id,
                 "name": ws.get("name", workspace_id.title()),
+                "version": ws.get("version", 0),
             },
+            "version": ws.get("version", 0),
         },
     )
     broadcast_presence(workspace_id)
@@ -404,6 +406,7 @@ def on_edit(data):
             "segments": ws["segments"],
             "from": sid,
             "change": change,
+            "version": ws.get("version", 0),
         },
         room=workspace_id,
         include_self=True,
@@ -460,9 +463,11 @@ def on_switch_workspace(data):
                 "workspace": {
                     "id": target,
                     "name": workspaces[target].get("name", target.title()),
+                    "version": workspaces[target].get("version", 0),
                 },
                 "users": presence_payload(target),
                 "workspaces": workspace_list_payload(),
+                "version": workspaces[target].get("version", 0),
             },
         )
         return
@@ -479,11 +484,13 @@ def on_switch_workspace(data):
             "workspace": {
                 "id": target,
                 "name": new_ws.get("name", target.title()),
+                "version": new_ws.get("version", 0),
             },
             "text": new_ws["text"],
             "segments": new_ws["segments"],
             "users": presence_payload(target),
             "workspaces": workspace_list_payload(),
+            "version": new_ws.get("version", 0),
         },
     )
 
