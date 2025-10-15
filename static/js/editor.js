@@ -61,6 +61,7 @@ let workspaceLabel = 'Main Workspace';
 let workspaceList = [];
 let workspaceNoteTimer = null;
 let workspaceBusy = false;
+let workspaceVersion = 0;
 let cursorEmitTimer = null;
 let lastCursorEmit = 0;
 let lastSentCursorPos = null;
@@ -667,6 +668,11 @@ socket.on('init', data => {
 
     workspaceId = data.workspace?.id || workspaceId;
     workspaceLabel = data.workspace?.name || workspaceLabel;
+    workspaceVersion = Number.isFinite(Number(data.version))
+        ? Number(data.version)
+        : Number.isFinite(Number(data.workspace?.version))
+            ? Number(data.workspace.version)
+            : 0;
     workspaceList = Array.isArray(data.workspaces) ? data.workspaces : [];
     populateWorkspaceSelect(workspaceList, workspaceId);
     updateWorkspaceStatus();
@@ -696,6 +702,16 @@ socket.on('init', data => {
 });
 
 socket.on('sync', data => {
+    const incomingVersion = Number(data.version);
+    if (Number.isFinite(incomingVersion)) {
+        if (incomingVersion < workspaceVersion) {
+            return;
+        }
+        workspaceVersion = incomingVersion;
+    } else {
+        workspaceVersion += 1;
+    }
+
     const isSelf = data.from === myId;
     const incomingSegments = data.segments || [];
 
@@ -783,6 +799,14 @@ socket.on('workspace_switched', data => {
     workspaceList = Array.isArray(data.workspaces) ? data.workspaces : workspaceList;
     workspaceId = data.workspace?.id || workspaceId;
     workspaceLabel = data.workspace?.name || workspaceLabel;
+    const reportedVersion = Number(data.version);
+    if (Number.isFinite(reportedVersion)) {
+        workspaceVersion = reportedVersion;
+    } else if (Number.isFinite(Number(data.workspace?.version))) {
+        workspaceVersion = Number(data.workspace.version);
+    } else {
+        workspaceVersion = 0;
+    }
     populateWorkspaceSelect(workspaceList, workspaceId);
     updateWorkspaceStatus();
 
