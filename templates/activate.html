@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Enter Activation Code</title>
+    <script>
+        (function() {
+            try {
+                const stored = localStorage.getItem('theme');
+                if (stored === 'light' || stored === 'dark') {
+                    document.documentElement.dataset.theme = stored;
+                }
+            } catch (err) {
+                // ignore errors
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/activate.css') }}">
+</head>
+<body>
+    <main class="auth-wrapper">
+        <section class="auth-card" aria-labelledby="activation-heading">
+            <h1 id="activation-heading">Activation Required</h1>
+            <p class="auth-description">Enter the activation code provided to you to unlock the collaborative editor.</p>
+            {% if error %}
+            <p class="auth-error" role="alert">{{ error }}</p>
+            {% endif %}
+            <form method="post" class="auth-form">
+                <label class="auth-label" for="code">Activation code</label>
+                <input id="code" name="code" type="password" autocomplete="off" required class="auth-input" placeholder="Enter your code">
+                <button type="submit" class="auth-button">Activate</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

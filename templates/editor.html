@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Collaborative Editor</title>
+    <script>
+        (function() {
+            try {
+                const stored = localStorage.getItem('theme');
+                if (stored === 'light' || stored === 'dark') {
+                    document.documentElement.dataset.theme = stored;
+                }
+            } catch (err) {
+                // Ignore access issues (e.g. privacy mode)
+            }
+        })();
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/editor.css') }}">
+</head>
+<body>
+    <header class="app-header">
+        <div class="app-header-left">
+            <div id="dot" class="status-dot" aria-hidden="true"></div>
+            <div class="name-field">
+                <span class="app-user-label">You</span>
+                <label class="sr-only" for="display-name">Display name</label>
+                <input id="display-name" class="display-name-input" type="text" maxlength="32" placeholder="Set your name" autocomplete="off">
+            </div>
+        </div>
+        <div class="workspace-controls" role="group" aria-label="Workspace controls">
+            <label class="sr-only" for="workspace-select">Workspace</label>
+            <select id="workspace-select" class="workspace-select" aria-label="Select workspace"></select>
+            <button id="workspace-new" class="workspace-btn" type="button">New</button>
+            <button id="workspace-save" class="workspace-btn" type="button">Save</button>
+            <button id="workspace-delete" class="workspace-btn" type="button">Delete</button>
+        </div>
+        <div class="app-header-right">
+            <button id="weather-toggle" class="weather-toggle" type="button" aria-label="Toggle weather panel">☁️</button>
+            <div id="participants" class="participants" aria-live="polite" aria-label="Connected collaborators"></div>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color mode">☀️</button>
+        </div>
+    </header>
+    <section id="weather-panel" class="weather-panel" aria-label="Weather information" hidden>
+        <header class="weather-header">
+            <h2>Weather</h2>
+            <p id="weather-message" class="weather-message" aria-live="polite"></p>
+        </header>
+        <form id="weather-form" class="weather-form">
+            <label class="sr-only" for="weather-query">Add location</label>
+            <input id="weather-query" class="weather-input" type="text" placeholder="Add a city" autocomplete="off">
+            <button type="submit" class="weather-add">Add</button>
+        </form>
+        <ul id="weather-list" class="weather-list"></ul>
+    </section>
+    <main class="app-main" role="main">
+        <aside id="gutter" class="editor-gutter" aria-hidden="true"></aside>
+        <section id="editor-wrapper" class="editor-wrapper" aria-label="Collaborative editor">
+            <div id="overlay" class="editor-overlay" aria-hidden="true"></div>
+            <textarea id="editor" class="editor-input" spellcheck="false" aria-label="Document editor"></textarea>
+            <div id="curs" class="cursor-layer" aria-hidden="true"></div>
+            <div id="measure" class="measure-layer" aria-hidden="true"></div>
+        </section>
+    </main>
+    <footer class="status-bar" aria-live="polite">
+        <div class="status-item" id="status-workspace">Workspace: <span id="workspace-name">Main Workspace</span> <span id="workspace-note" class="status-note"></span></div>
+        <div class="status-item">Words: <span id="status-words">0</span></div>
+        <div class="status-item">Lines: <span id="status-lines">1</span></div>
+        <div class="status-item">Characters: <span id="status-chars">0</span></div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/editor.js') }}" defer></script>
+</body>
+</html>
