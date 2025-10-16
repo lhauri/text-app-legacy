@@ -17,6 +17,7 @@
     --accent: #6366f1;
     --accent-soft: rgba(99, 102, 241, 0.18);
     --focus-ring: rgba(99, 102, 241, 0.35);
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
 }
 
 :root[data-theme="light"] {
@@ -581,6 +582,9 @@ body {
     user-select: none;
     font-size: 13px;
     line-height: 22px;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
+    font-feature-settings: 'liga' 0, 'calt' 0, 'clig' 0;
     border-right: 1px solid var(--surface-border);
     overflow: hidden;
     min-width: 56px;
@@ -609,7 +613,9 @@ body {
     padding: 20px;
     font-size: 14px;
     line-height: 22px;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
+    font-feature-settings: 'liga' 0, 'calt' 0, 'clig' 0;
     caret-color: var(--text);
 }
 
@@ -692,7 +698,9 @@ body {
     padding: 20px;
     font-size: 14px;
     line-height: 22px;
-    font-family: inherit;
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
+    font-feature-settings: 'liga' 0, 'calt' 0, 'clig' 0;
     white-space: pre-wrap;
     word-wrap: break-word;
 }
