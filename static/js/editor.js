@@ -890,9 +890,14 @@ ed.addEventListener('input', () => {
         newE--;
     }
 
-    // Send the full text together with a compact range describing what changed
-    // so the server can update other collaborators efficiently.
-    socket.emit('edit', { text: txt, range: { s, e: newE } });
+    // Send both the absolute edit coordinates and the slice that changed so the
+    // server can merge concurrent edits without losing characters.
+    socket.emit('edit', {
+        text: txt,
+        range: { start: s, old_end: oldE, new_end: newE, s, e: newE },
+        delta: txt.slice(s, newE),
+        version: workspaceVersion
+    });
 
     applyLocalSegmentsEdit(s, oldE, newE);
     lastText = txt;
