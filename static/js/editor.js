@@ -49,6 +49,43 @@ const CURSOR_TOOLTIP_MARGIN_X = 10;
 const CURSOR_TOOLTIP_MARGIN_Y = 14;
 const CURSOR_THROTTLE_MS = 40;
 
+/**
+ * Compute the minimal range that changed between two text snapshots.
+ * The returned object always uses the coordinates of the "before" text
+ * for {@link start} and {@link old_end}, and the coordinates of the
+ * "after" text for {@link new_end}. This makes it safe to map cursor
+ * positions forward even when the server applied the edit slightly out
+ * of order (for example when two people type at once).
+ */
+function computeTextDiff(before = '', after = '') {
+    if (typeof before !== 'string') before = '';
+    if (typeof after !== 'string') after = '';
+
+    if (before === after) {
+        const pos = before.length;
+        return { start: pos, old_end: pos, new_end: pos };
+    }
+
+    let start = 0;
+    const maxPrefix = Math.min(before.length, after.length);
+    while (start < maxPrefix && before.charCodeAt(start) === after.charCodeAt(start)) {
+        start += 1;
+    }
+
+    let beforeEnd = before.length;
+    let afterEnd = after.length;
+    while (
+        beforeEnd > start &&
+        afterEnd > start &&
+        before.charCodeAt(beforeEnd - 1) === after.charCodeAt(afterEnd - 1)
+    ) {
+        beforeEnd -= 1;
+        afterEnd -= 1;
+    }
+
+    return { start, old_end: beforeEnd, new_end: afterEnd };
+}
+
 let myCol = '#3b82f6';
 let myId = null;
 let lastText = '';
@@ -727,21 +764,28 @@ socket.on('sync', data => {
     }
 
     const hadFocus = document.activeElement === ed;
+    const prevText = ed.value;
     const prevSelStart = ed.selectionStart;
     const prevSelEnd = ed.selectionEnd;
     const selectionDirection = ed.selectionDirection;
     const prevScrollTop = ed.scrollTop;
     const prevScrollLeft = ed.scrollLeft;
 
-    ed.value = data.text;
-    lastText = data.text;
+    // Compare the text we currently display with what the server sent. The
+    // derived range tells us exactly which slice changed in our view so we can
+    // keep the local caret anchored even if multiple edits raced on the server.
+    const incomingText = typeof data.text === 'string' ? data.text : '';
+    const changeForView = computeTextDiff(prevText, incomingText);
+
+    ed.value = incomingText;
+    lastText = incomingText;
     segments = normalizeSegments(incomingSegments);
     meas.textContent = ed.value;
 
     if (hadFocus) {
         let nextStart = prevSelStart;
         let nextEnd = prevSelEnd;
-        const change = data.change;
+        const change = changeForView || data.change;
         if (change) {
             const { start, old_end, new_end } = change;
             const oldLen = old_end - start;
@@ -765,8 +809,10 @@ socket.on('sync', data => {
     ed.scrollTop = prevScrollTop;
     ed.scrollLeft = prevScrollLeft;
 
-    if (data.change) {
-        adjustPeerPositions(data.change, data.from);
+    if (changeForView) {
+        // Re-base stored collaborator cursor positions against the same change
+        // description we used for the local caret so everyone stays aligned.
+        adjustPeerPositions(changeForView, data.from);
     }
 
     updateGutter();
@@ -844,6 +890,8 @@ ed.addEventListener('input', () => {
         newE--;
     }
 
+    // Send the full text together with a compact range describing what changed
+    // so the server can update other collaborators efficiently.
     socket.emit('edit', { text: txt, range: { s, e: newE } });
 
     applyLocalSegmentsEdit(s, oldE, newE);
@@ -1253,6 +1301,8 @@ function updateParticipants(list) {
 }
 
 function adjustPeerPositions(change, authorId) {
+    // Shift all cached collaborator cursor positions so they remain attached to
+    // the same logical text even after edits that happened before reaching us.
     const { start, old_end, new_end } = change;
     const oldLen = old_end - start;
     const newLen = new_end - start;
