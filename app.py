@@ -43,6 +43,7 @@ def new_workspace_payload(name: Optional[str] = None):
         "text": DEFAULT_TEXT,
         "segments": [],
         "version": 0,
+        "history": [],
     }
 
 
@@ -52,6 +53,7 @@ workspaces = {
         "text": DEFAULT_TEXT,
         "segments": [],
         "version": 0,
+        "history": [],
     }
 }
 
@@ -87,6 +89,8 @@ def ensure_workspace(workspace_id: str):
     if ws is None:
         workspaces[workspace_id] = new_workspace_payload()
         ws = workspaces[workspace_id]
+    if not isinstance(ws.get("history"), list):
+        ws["history"] = []
     return ws
 
 
@@ -214,24 +218,45 @@ def update_workspace(workspace_id):
         abort(404)
 
     payload = request.get_json(silent=True) or {}
+    ws = ensure_workspace(workspace_id)
+    old_text = ws.get("text", "")
+    history = ws.get("history")
+    if not isinstance(history, list):
+        history = []
+    ws["history"] = history
+
     if "name" in payload:
         new_name = (payload.get("name") or "").strip()
         if new_name:
-            workspaces[workspace_id]["name"] = new_name
+            ws["name"] = new_name
 
+    text_updated = False
     if "text" in payload and isinstance(payload["text"], str):
-        workspaces[workspace_id]["text"] = payload["text"]
+        ws["text"] = payload["text"]
+        text_updated = True
 
     if "segments" in payload and isinstance(payload["segments"], list):
-        workspaces[workspace_id]["segments"] = payload["segments"]
+        ws["segments"] = payload["segments"]
 
-    workspaces[workspace_id]["version"] = workspaces[workspace_id].get("version", 0) + 1
+    ws["version"] = ws.get("version", 0) + 1
+
+    if text_updated:
+        history.append(
+            {
+                "version": ws["version"],
+                "start": 0,
+                "old_end": len(old_text),
+                "new_end": len(ws.get("text", "")),
+            }
+        )
+        if len(history) > 500:
+            del history[:-500]
 
     return jsonify(
         {
             "workspace": {
                 "id": workspace_id,
-                "name": workspaces[workspace_id]["name"],
+                "name": ws["name"],
             },
             "workspaces": workspace_list_payload(),
         }
@@ -349,55 +374,174 @@ def on_edit(data):
     workspace_id = users[sid]["workspace"]
     ws = ensure_workspace(workspace_id)
 
-    old_text = ws["text"]
-    new_text = data["text"]
-    ws["text"] = new_text
-    ws["version"] = ws.get("version", 0) + 1
+    old_text = ws.get("text", "")
+    incoming_text = data.get("text") if isinstance(data, dict) else None
+    if not isinstance(incoming_text, str):
+        incoming_text = old_text
 
-    change = None
-    rng = data.get("range")
-    if rng:
-        start = rng["s"]
-        end_new = rng["e"]
-        old_end = start + (len(old_text) - len(new_text) + end_new - start)
-        new_len = end_new - start
+    def to_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
-        change = {"start": start, "old_end": old_end, "new_end": end_new}
+    range_payload = data.get("range") if isinstance(data, dict) else None
+    if not isinstance(range_payload, dict):
+        range_payload = {}
 
-        new_segments = []
-        for seg in ws["segments"]:
-            if seg["end"] <= start:
-                new_segments.append(seg)
-            elif seg["start"] >= old_end:
-                shift = new_len - (old_end - start)
-                new_segments.append(
-                    {
-                        "start": seg["start"] + shift,
-                        "end": seg["end"] + shift,
-                        "color": seg["color"],
-                    }
-                )
-            elif seg["start"] >= start and seg["end"] <= old_end:
-                pass
-            else:
-                new_start = seg["start"] if seg["start"] < start else start
-                new_end = seg["end"] if seg["end"] > old_end else old_end
-                shift = new_len - (old_end - start)
-                if new_end + shift > new_start:
-                    new_segments.append(
-                        {
-                            "start": new_start,
-                            "end": new_end + shift,
-                            "color": seg["color"],
-                        }
-                    )
+    raw_start = range_payload.get("start")
+    if raw_start is None:
+        raw_start = range_payload.get("s")
+    raw_old_end = range_payload.get("old_end")
+    raw_new_end = range_payload.get("new_end")
+    if raw_new_end is None:
+        raw_new_end = range_payload.get("e")
 
-        if end_new > start:
+    text_length = len(incoming_text)
+    slice_start = to_int(raw_start)
+    if slice_start is None:
+        slice_start = 0
+    slice_start = max(0, min(text_length, slice_start))
+
+    slice_end = to_int(raw_new_end)
+    if slice_end is None:
+        slice_end = slice_start
+    slice_end = max(slice_start, min(text_length, slice_end))
+
+    delta_text = data.get("delta") if isinstance(data, dict) else None
+    if not isinstance(delta_text, str):
+        delta_text = incoming_text[slice_start:slice_end]
+
+    start = to_int(raw_start)
+    if start is None:
+        start = slice_start
+
+    old_end = to_int(raw_old_end)
+    if old_end is None and start is not None:
+        base_delta = len(old_text) - len(incoming_text)
+        replacement = slice_end - slice_start
+        guess = start + max(0, base_delta + replacement)
+        old_end = guess
+
+    if start is None or old_end is None:
+        start = 0
+        old_end = len(old_text)
+        delta_text = incoming_text
+
+    base_version = to_int((data or {}).get("version")) if isinstance(data, dict) else None
+    if base_version is None and isinstance(data, dict):
+        base_version = to_int(data.get("base_version"))
+
+    current_version = ws.get("version", 0)
+    history = ws.get("history")
+    if not isinstance(history, list):
+        history = []
+    ws["history"] = history
+
+    def map_position(pos, c_start, c_old_end, c_new_end, treat_end=False):
+        if pos is None:
+            return None
+        c_start = max(0, c_start)
+        if c_old_end < c_start:
+            c_old_end = c_start
+        if c_new_end < c_start:
+            c_new_end = c_start
+        old_len = c_old_end - c_start
+        new_len = c_new_end - c_start
+        delta = new_len - old_len
+        if pos <= c_start:
+            return pos
+        if pos >= c_old_end:
+            return pos + delta
+        return c_start + (new_len if treat_end else 0)
+
+    if (
+        base_version is not None
+        and base_version < current_version
+        and history
+    ):
+        for change_entry in history:
+            change_version = to_int(change_entry.get("version"))
+            if change_version is None or change_version <= base_version:
+                continue
+            c_start = to_int(change_entry.get("start")) or 0
+            c_old_end = to_int(change_entry.get("old_end"))
+            if c_old_end is None:
+                c_old_end = c_start
+            c_new_end = to_int(change_entry.get("new_end"))
+            if c_new_end is None:
+                c_new_end = c_start
+            start = map_position(start, c_start, c_old_end, c_new_end, treat_end=False)
+            old_end = map_position(old_end, c_start, c_old_end, c_new_end, treat_end=True)
+
+    old_text_len = len(old_text)
+    start = max(0, min(old_text_len, start))
+    old_end = max(start, min(old_text_len, old_end))
+
+    if not isinstance(delta_text, str):
+        delta_text = ""
+
+    new_text = old_text[:start] + delta_text + old_text[old_end:]
+
+    new_end = start + len(delta_text)
+    change = {"start": start, "old_end": old_end, "new_end": new_end}
+
+    prev_segments = ws.get("segments")
+    if not isinstance(prev_segments, list):
+        prev_segments = []
+
+    new_segments = []
+    shift = new_end - start - (old_end - start)
+    for seg in prev_segments:
+        if not isinstance(seg, dict):
+            continue
+        seg_start = seg.get("start")
+        seg_end = seg.get("end")
+        seg_color = seg.get("color")
+        if not all(isinstance(v, (int, float)) for v in (seg_start, seg_end)):
+            continue
+        seg_start = int(seg_start)
+        seg_end = int(seg_end)
+        if seg_end <= start:
+            new_segments.append({"start": seg_start, "end": seg_end, "color": seg_color})
+        elif seg_start >= old_end:
             new_segments.append(
-                {"start": start, "end": end_new, "color": users[sid]["color"]}
+                {
+                    "start": seg_start + shift,
+                    "end": seg_end + shift,
+                    "color": seg_color,
+                }
             )
+        elif seg_start >= start and seg_end <= old_end:
+            continue
+        else:
+            new_start = seg_start if seg_start < start else start
+            new_seg_end = seg_end if seg_end > old_end else old_end
+            adjusted_end = new_seg_end + shift
+            if adjusted_end > new_start:
+                new_segments.append(
+                    {"start": new_start, "end": adjusted_end, "color": seg_color}
+                )
 
-        ws["segments"] = new_segments
+    if new_end > start and delta_text:
+        new_segments.append(
+            {"start": start, "end": new_end, "color": users[sid]["color"]}
+        )
+
+    ws["text"] = new_text
+    ws["segments"] = new_segments
+    ws["version"] = current_version + 1
+
+    history.append(
+        {
+            "version": ws["version"],
+            "start": start,
+            "old_end": old_end,
+            "new_end": new_end,
+        }
+    )
+    if len(history) > 500:
+        del history[:-500]
 
     emit(
         "sync",
